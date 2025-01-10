@@ -22,6 +22,10 @@ func parseFloat(s string) float64 {
 	f, _ := strconv.ParseFloat(s, 64)
 	return f
 }
+func parseInt(s string) int {
+	i, _ := strconv.Atoi(s)
+	return i
+}
 
 func (h *InvoiceHandler) CreateInvoice(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -61,12 +65,34 @@ func (h *InvoiceHandler) CreateInvoice(w http.ResponseWriter, r *http.Request) {
         }
     }
 
+	var items []models.Item
+    itemDescriptions := r.Form["items.item_description"]
+    itemQuantities := r.Form["items.item_quantity"]
+    itemRates := r.Form["items.item_rate"]
+    
+    for i := 0; i < len(itemDescriptions); i++ {
+        items = append(items, models.Item{
+            ItemDescription: itemDescriptions[i],
+            ItemQuantity:    parseInt(itemQuantities[i]),
+            ItemRate:        parseFloat(itemRates[i]),
+            Amount:          parseFloat(itemRates[i]) * float64(parseInt(itemQuantities[i])),
+        })
+    }
+
+	// Parse invoice number to int64
+	invoiceNumber, err := strconv.ParseInt(r.FormValue("invoice_number"), 10, 64)
+	if err != nil {
+		http.Error(w, "Invalid invoice number: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
 	invoice := models.Invoice{
 		BillTo:         r.FormValue("bill_to"),
 		BillFrom:       r.FormValue("bill_from"), 
-		InvoiceNumber:  r.FormValue("invoice_number"),
+		InvoiceNumber: invoiceNumber,
 		InvoiceDate:    r.FormValue("invoice_date"),
 		DueDate:        r.FormValue("due_date"),
+		Items:          items,
 		InvoiceSubTotal: parseFloat(r.FormValue("invoice_sub_total")),
 		Tax:            parseFloat(r.FormValue("tax")),
 		InvoiceTotal:   parseFloat(r.FormValue("invoice_total")),
@@ -75,10 +101,25 @@ func (h *InvoiceHandler) CreateInvoice(w http.ResponseWriter, r *http.Request) {
 		Currency:       r.FormValue("currency"),
 		BillToLogo:     logoPath,
 	}
+	transactionErr := h.DB.Transaction(func(tx *gorm.DB) error {
+        // Create the invoice first
+        if err := tx.Create(&invoice).Error; err != nil {
+            return err
+        }
 
-	result := h.DB.Create(&invoice)
-	if result.Error != nil {
-		http.Error(w, "Failed to create invoice: "+result.Error.Error(), http.StatusInternalServerError)
+        // Create associated items
+        for i := range items {
+            items[i].InvoiceID = invoice.ID
+            if err := tx.Create(&items[i]).Error; err != nil {
+                return err
+            }
+        }
+
+        return nil
+    })
+
+	if transactionErr != nil {
+		http.Error(w, "Failed to create invoice: "+transactionErr.Error(), http.StatusInternalServerError)
 		return
 	}
 
