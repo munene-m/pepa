@@ -11,12 +11,10 @@ import (
 func Migrate(db *gorm.DB) error {
     // Create tables in the correct order
     err := db.Transaction(func(tx *gorm.DB) error {
-        // Migrate Invoice first
         if err := tx.AutoMigrate(&models.Invoice{}); err != nil {
             return err
         }
         
-        // Then migrate Item
         if err := tx.AutoMigrate(&models.Item{}); err != nil {
             return err
         }
