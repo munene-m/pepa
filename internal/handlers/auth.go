@@ -5,7 +5,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"strings"
 
 	"github.com/gorilla/sessions"
 	"github.com/markbates/goth"
@@ -34,7 +33,6 @@ func NewAuthHandler(db *gorm.DB) *AuthHandler {
 }
 
 func InitializeGoogleAuth() {
-	// Get credentials from environment variables
 	googleClientID := os.Getenv("GOOGLE_CLIENT_ID")
 	googleClientSecret := os.Getenv("GOOGLE_CLIENT_SECRET")
 	
@@ -45,19 +43,18 @@ func InitializeGoogleAuth() {
 		log.Fatal("SESSION_KEY must be set")
 	}
 
-	// Initialize the session store for Gothic
 	store := sessions.NewCookieStore([]byte(sessionKey))
 	gothic.Store = store
 
-	// Initialize Google provider
-	googleProvider := google.New(googleClientID, googleClientSecret, callbackURL)
-	
-	// Register the provider with Goth
+	googleProvider := google.New(googleClientID, googleClientSecret, callbackURL, 
+		"email",
+		"profile",
+		"openid",
+	)
 	goth.UseProviders(googleProvider)
 }
 
 func (h *AuthHandler) LogoutHandler(w http.ResponseWriter, r *http.Request) {
-	// Get the session
 	session, err := h.SessionStore.Get(r, "auth-session")
 	if err != nil {
 		http.Error(w, "Error getting session: "+err.Error(), http.StatusInternalServerError)
@@ -99,30 +96,12 @@ func (h *AuthHandler) CallbackHandler(w http.ResponseWriter, r *http.Request) {
         http.Error(w, err.Error(), http.StatusInternalServerError)
         return
     }
-    
-    // Extract name parts from email if FirstName/LastName are empty
-    firstName := user.FirstName
-    lastName := user.LastName
-    if firstName == "" && lastName == "" && user.Email != "" {
-        parts := strings.Split(user.Email, "@")
-        nameParts := strings.Split(parts[0], ".")
-        if len(nameParts) > 1 {
-            firstName = strings.Title(nameParts[0])
-            lastName = strings.Title(nameParts[1])
-        } else {
-            firstName = strings.Title(nameParts[0])
-        }
-    }
 
     // Create or update user in database with all available fields
     dbUser := &models.User{
         Email:          user.Email,
         Name:          user.Name,
-        FirstName:     firstName,
-        LastName:      lastName,
         GoogleID:      user.UserID,
-        AccessToken:   user.AccessToken,
-        RefreshToken:  user.RefreshToken,
         ProfilePicture: user.AvatarURL,
         Locale:         user.Location,
         EmailVerified:  true,
